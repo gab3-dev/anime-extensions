@@ -432,10 +432,7 @@ abstract class AniZone :
     private fun Document.vidstackData(): VidstackConfig? {
         val xData = selectFirst("[x-data*=vidstackPlayer]")?.attr("x-data") ?: return null
 
-        val jsonString = VIDSTACK_REGEX
-            .find(xData)
-            ?.groupValues?.get(1)
-            ?: return null
+        val jsonString = xData.findRawJsonParseArg() ?: return null
 
         val normalizedJson = jsonString
             .replace("""\u0022""", "\"")
@@ -822,11 +819,11 @@ abstract class AniZone :
 
     /**
      * Extracts one JSON.parse string argument without applying a recursive regex
-     * to the entire x-data attribute. AniZone's anime catalogue can return several
-     * thousand characters of escaped JSON; the old `JSON_PARSE_REGEX` overflowed
-     * the sidecar's Java regex stack while traversing that payload.
+     * to the entire x-data attribute. AniZone's catalogue and Vidstack player
+     * payloads contain several thousand characters of escaped JSON; recursive
+     * Java regex matching overflowed the sidecar stack on both paths.
      */
-    private fun String.findRawJsonParseArg(key: String): String? {
+    private fun String.findRawJsonParseArg(key: String? = null): String? {
         val parsePrefix = "JSON.parse('"
         var searchStart = 0
 
@@ -847,6 +844,8 @@ abstract class AniZone :
                 }
             }
             if (valueEnd >= length) return null
+
+            if (key == null) return substring(valueStart, valueEnd)
 
             var colonIndex = parseStart - 1
             while (colonIndex >= 0 && this[colonIndex].isWhitespace()) colonIndex--
@@ -1011,7 +1010,6 @@ abstract class AniZone :
         private val SLUG_REGEX = Regex("""anmSlug:\s*'([^']+)'""")
         private val SET_VIDEO_REGEX = Regex("""setVideo\(['"]?(\d+)['"]?\)""")
 
-        private val VIDSTACK_REGEX = Regex("""JSON\.parse\('((?:[^'\\]|\\.)*)'\)""")
         private val DATE_REGEX = Regex("""\d{4}-\d{2}-\d{2}""")
         private val SEASON_REGEX = Regex("(?i)s\\d+")
         private val EPISODE_NUMBER_REGEX = Regex("""\d+(\.\d+)?""")
