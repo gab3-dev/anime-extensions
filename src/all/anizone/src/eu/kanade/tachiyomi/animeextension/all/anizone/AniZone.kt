@@ -820,8 +820,51 @@ abstract class AniZone :
         }
     }
 
-    /** Finds the raw (still-escaped) argument to `JSON.parse('...')` for the x-data key named [key]. */
-    private fun String.findRawJsonParseArg(key: String): String? = JSON_PARSE_REGEX.findAll(this).firstOrNull { it.groupValues[1] == key }?.groupValues?.get(2)
+    /**
+     * Extracts one JSON.parse string argument without applying a recursive regex
+     * to the entire x-data attribute. AniZone's anime catalogue can return several
+     * thousand characters of escaped JSON; the old `JSON_PARSE_REGEX` overflowed
+     * the sidecar's Java regex stack while traversing that payload.
+     */
+    private fun String.findRawJsonParseArg(key: String): String? {
+        val parsePrefix = "JSON.parse('"
+        var searchStart = 0
+
+        while (searchStart < length) {
+            val parseStart = indexOf(parsePrefix, searchStart)
+            if (parseStart < 0) return null
+
+            val valueStart = parseStart + parsePrefix.length
+            var valueEnd = valueStart
+            while (valueEnd < length) {
+                when (this[valueEnd]) {
+                    '\\' -> {
+                        if (valueEnd + 1 >= length) return null
+                        valueEnd += 2
+                    }
+                    '\'' -> break
+                    else -> valueEnd++
+                }
+            }
+            if (valueEnd >= length) return null
+
+            var colonIndex = parseStart - 1
+            while (colonIndex >= 0 && this[colonIndex].isWhitespace()) colonIndex--
+            if (colonIndex >= 0 && this[colonIndex] == ':') {
+                var keyStart = colonIndex - 1
+                while (keyStart >= 0 && this[keyStart].isJsonIdentifierChar()) keyStart--
+                if (substring(keyStart + 1, colonIndex) == key) {
+                    return substring(valueStart, valueEnd)
+                }
+            }
+
+            searchStart = valueEnd + 1
+        }
+
+        return null
+    }
+
+    private fun Char.isJsonIdentifierChar(): Boolean = this in 'a'..'z' || this in 'A'..'Z' || this in '0'..'9' || this == '_'
 
     /**
      * Removes a field's value from a raw (still hex-escaped) x-data
@@ -968,7 +1011,6 @@ abstract class AniZone :
         private val SLUG_REGEX = Regex("""anmSlug:\s*'([^']+)'""")
         private val SET_VIDEO_REGEX = Regex("""setVideo\(['"]?(\d+)['"]?\)""")
 
-        private val JSON_PARSE_REGEX = Regex("""([a-zA-Z0-9_]+):\s*JSON\.parse\('((?:[^'\\]|\\.)*)'\)""")
         private val VIDSTACK_REGEX = Regex("""JSON\.parse\('((?:[^'\\]|\\.)*)'\)""")
         private val DATE_REGEX = Regex("""\d{4}-\d{2}-\d{2}""")
         private val SEASON_REGEX = Regex("(?i)s\\d+")
